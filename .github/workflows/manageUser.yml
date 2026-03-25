@@ -1,0 +1,62 @@
+name: manageUser
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "选择操作"
+        required: true
+        type: choice
+        options:
+          - 查看用户列表
+          - 移除用户
+      userid:
+        description: "要移除的userid（仅移除时需要填写）"
+        required: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6
+      - name: 创建node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: ./api/package-lock.json
+      - name: 🔧 安装GitHub CLI，并使用PAT登录
+        env:
+          PAT: ${{ secrets.PAT }}
+        run: |
+          if [ -n "${PAT}" ]; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update
+            sudo apt install gh -y
+            echo "${{ secrets.PAT }}" | gh auth login --with-token
+          fi
+      - name: Cache node_modules in api directory
+        id: cache-npm
+        uses: actions/cache@v5
+        with:
+          path: ./api/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('./api/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - name: 安装依赖
+        run: npm run install
+        if: ${{ steps.cache-npm.outputs.cache-hit != 'true' }}
+      - name: 校验参数
+        if: ${{ github.event.inputs.action == '移除用户' && github.event.inputs.userid == '' }}
+        run: |
+          echo "::error::移除用户时必须填写 userid"
+          exit 1
+      - name: 执行操作
+        run: node manageUser.js
+        env:
+          ACTION: ${{ github.event.inputs.action == '查看用户列表' && 'list' || 'remove' }}
+          USERID: ${{ github.event.inputs.userid }}
+          USERINFO: ${{ secrets.USERINFO }}
+          PAT: ${{ secrets.PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
